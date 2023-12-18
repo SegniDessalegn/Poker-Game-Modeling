@@ -1,9 +1,4 @@
 
-
-"""
-We can use backtracking to generate all the possible sequences
-"""
-
 class Game:
     def __init__(self, initial_pot = 60):
         self.initial_pot = initial_pot
