@@ -5,4 +5,4 @@ An implementation of the task https://gist.github.com/tadas-subonis/448ff7e837eb
 - run ```cargo build``` in the project root directory
 - run specific package using ```cargo run -p task1```, ```cargo run -p task2``` or ```cargo run -p task3```
 
-## This [Repo](https://github.com/SegniDessalegn/rustlings-solutions) contains the solutions of Rustlings problems, I love it so far 🔥
+## This [repo](https://github.com/SegniDessalegn/rustlings-solutions) contains my solutions to the rustlings problems, I love it so far! 🔥
