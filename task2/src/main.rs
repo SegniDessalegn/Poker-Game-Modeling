@@ -1,32 +1,86 @@
 use std::collections::HashMap;
-use std::convert::TryInto;
 use std::fmt;
 
-const _N_ACTIONS: i32 = 2;
-const _N_CARDS: i32 = 3;
+const N_ACTIONS: usize = 2;
+const N_CARDS: usize = 3;
 
-fn main() {
-    let mut i_map: HashMap<String, InformationSet> = HashMap::new();
-    let mut expected_game_value = 0.0; // Make it mutable
-    let n_iterations = 10000;
+const CHANCE_ACTIONS: [&str; 2] = ["c", "b"];
 
-    for _ in 0..n_iterations {
-        expected_game_value += cfr(&mut i_map, "", -1, -1, 1.0, 1.0, 1.0);
-        for v in i_map.values_mut() {
-            v.next_strategy();
+#[derive(Debug)]
+pub struct InformationSet {
+    pub key: String,
+    pub regret_sum: [f64; N_ACTIONS],
+    pub strategy_sum: [f64; N_ACTIONS],
+    pub strategy: [f64; N_ACTIONS],
+    pub reach_pr: f64,
+    pub reach_pr_sum: f64,
+}
+
+impl InformationSet {
+    pub fn new(key: &str) -> InformationSet {
+        InformationSet {
+            key: key.to_string(),
+            regret_sum: [0.0; N_ACTIONS],
+            strategy_sum: [0.0; N_ACTIONS],
+            strategy: [1.0 / N_ACTIONS as f64; N_ACTIONS],
+            reach_pr: 0.0,
+            reach_pr_sum: 0.0,
         }
     }
 
-    expected_game_value /= n_iterations as f64;
+    pub fn next_strategy(&mut self) {
+        self.strategy_sum
+            .iter_mut()
+            .zip(self.strategy.iter())
+            .for_each(|(a, &b)| *a += self.reach_pr * b);
 
-    display_results(expected_game_value, &i_map);
+        self.strategy = self.calc_strategy();
+        self.reach_pr_sum += self.reach_pr;
+        self.reach_pr = 0.0;
+    }
+
+    fn calc_strategy(&self) -> [f64; N_ACTIONS] {
+        let strategy = self.make_positive(self.regret_sum);
+
+        let total = strategy.iter().sum::<f64>();
+
+        if total > 0.0 {
+            strategy.map(|x| x / total)
+        } else {
+            [1.0 / N_ACTIONS as f64; N_ACTIONS]
+        }
+    }
+
+    fn get_average_strategy(&self) -> [f64; N_ACTIONS] {
+        let strategy = self.strategy_sum.map(|x| x / self.reach_pr_sum);
+
+        let strategy = strategy.map(|x| if x < 0.001 { 0.0 } else { x });
+
+        let total = strategy.iter().sum::<f64>();
+
+        if total > 0.0 {
+            strategy.map(|x| x / total)
+        } else {
+            [1.0 / N_ACTIONS as f64; N_ACTIONS]
+        }
+    }
+
+    fn make_positive(&self, x: [f64; N_ACTIONS]) -> [f64; N_ACTIONS] {
+        x.map(|val| val.max(0.0))
+    }
 }
 
-fn cfr(
+impl fmt::Display for InformationSet {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{} {:?}", self.key, self.get_average_strategy())
+    }
+}
+
+pub fn cfr(
     i_map: &mut HashMap<String, InformationSet>,
     history: &str,
-    card_1: i32,
-    card_2: i32,
+    card_1: isize,
+    card_2: isize,
     pr_1: f64,
     pr_2: f64,
     pr_c: f64,
@@ -36,24 +90,25 @@ fn cfr(
     }
 
     if is_terminal(history) {
-        return terminal_util(history, card_1, card_2) as f64;
+        return terminal_util(history, card_1, card_2);
     }
 
     let n = history.len();
     let is_player_1 = n % 2 == 0;
-    let mut info_set = get_info_set(i_map, if is_player_1 { card_1 } else { card_2 }, history);
+
+    let (key, mut info_set) = get_info_set(
+        i_map,
+        if is_player_1 { card_1 } else { card_2 },
+        history,
+    );
 
     let strategy = &info_set.strategy;
-    if is_player_1 {
-        info_set.reach_pr += pr_1;
-    } else {
-        info_set.reach_pr += pr_2;
-    }
 
-    // Counterfactual utility per action.
-    let mut action_utils = vec![0.0; _N_ACTIONS as usize];
+    info_set.reach_pr += if is_player_1 { pr_1 } else { pr_2 };
 
-    for (i, action) in ["c", "b"].iter().enumerate() {
+    let mut action_utils = [0.0; N_ACTIONS];
+
+    for (i, action) in CHANCE_ACTIONS.iter().enumerate() {
         let next_history = format!("{}{}", history, action);
         if is_player_1 {
             action_utils[i] =
@@ -64,40 +119,51 @@ fn cfr(
         }
     }
 
-    // Utility of information set.
-    let util = action_utils.iter().zip(strategy.iter()).map(|(&a, &b)| a * b).sum();
-    let regrets: Vec<_> = action_utils.iter().map(|&a| a - util).collect();
+    let util = action_utils.iter().zip(strategy.iter()).map(|(&x, &y)| x * y).sum();
+    let regrets: Vec<f64> =
+        action_utils.iter().zip(strategy.iter()).map(|(&_x, &_y)| _x - util).collect();
 
     if is_player_1 {
-        info_set.regret_sum.iter_mut().zip(regrets.iter()).for_each(|(r, &regret)| {
-            *r += pr_2 * pr_c * regret;
-        });
+        info_set
+            .regret_sum
+            .iter_mut()
+            .zip(regrets.iter())
+            .for_each(|(a, &b)| *a += pr_2 * pr_c * b);
     } else {
-        info_set.regret_sum.iter_mut().zip(regrets.iter()).for_each(|(r, &regret)| {
-            *r += pr_1 * pr_c * regret;
-        });
+        info_set
+            .regret_sum
+            .iter_mut()
+            .zip(regrets.iter())
+            .for_each(|(a, &b)| *a += pr_1 * pr_c * b);
     }
+
+    i_map.insert(key, info_set);
 
     util
 }
 
 fn is_chance_node(history: &str) -> bool {
-    history == ""
+    history.is_empty()
 }
 
 fn chance_util(i_map: &mut HashMap<String, InformationSet>) -> f64 {
     let mut expected_value = 0.0;
     let n_possibilities = 6;
-
-    for i in 0.._N_CARDS {
-        for j in 0.._N_CARDS {
+    for i in 0..N_CARDS {
+        for j in 0..N_CARDS {
             if i != j {
-                expected_value +=
-                    cfr(i_map, "rr", i, j, 1.0, 1.0, 1.0 / n_possibilities as f64);
+                expected_value += cfr(
+                    i_map,
+                    "rr",
+                    i as isize,
+                    j as isize,
+                    1.0,
+                    1.0,
+                    1.0 / n_possibilities as f64,
+                );
             }
         }
     }
-
     expected_value / n_possibilities as f64
 }
 
@@ -106,145 +172,87 @@ fn is_terminal(history: &str) -> bool {
     possibilities.contains(&history)
 }
 
-fn terminal_util(history: &str, card_1: i32, card_2: i32) -> i32 {
+fn terminal_util(history: &str, card_1: isize, card_2: isize) -> f64 {
     let n = history.len();
     let card_player = if n % 2 == 0 { card_1 } else { card_2 };
     let card_opponent = if n % 2 == 0 { card_2 } else { card_1 };
-
     match history {
-        "rrcbc" | "rrbc" => 1, // Last player folded. The current player wins.
+        "rrcbc" | "rrbc" => 1.0,
         "rrcc" => {
-            // Showdown with no bets
             if card_player > card_opponent {
-                1
+                1.0
             } else {
-                -1
+                -1.0
             }
         }
         "rrcbb" | "rrbb" => {
-            // Showdown with 1 bet
             if card_player > card_opponent {
-                2
+                2.0
             } else {
-                -2
+                -2.0
             }
         }
-        _ => panic!("Invalid history"),
+        _ => 0.0,
     }
 }
 
-fn card_str(card: usize) -> String {
-    match card {
-        0 => String::from("J"),
-        1 => String::from("Q"),
-        _ => String::from("K"),
-    }
-}
-
-fn get_info_set(i_map: &mut HashMap<String, InformationSet>, card: i32, history: &str) -> InformationSet {
+fn get_info_set(
+    i_map: &mut HashMap<String, InformationSet>,
+    card: isize,
+    history: &str,
+) -> (String, InformationSet) {
     let key = format!("{} {}", card_str(card as usize), history);
-    let info_set = i_map.entry(key.clone()).or_insert_with(|| InformationSet::new(key.clone()));
-    info_set.clone()
+
+    let info_set = match i_map.remove(&key) {
+        Some(info_set) => info_set,
+        None => InformationSet::new(&key),
+    };
+
+    (key, info_set)
 }
 
-struct InformationSet {
-    key: String,
-    regret_sum: [f64; _N_ACTIONS as usize],
-    strategy_sum: [f64; _N_ACTIONS as usize],
-    strategy: [f64; _N_ACTIONS as usize],
-    reach_pr: f64,
-    reach_pr_sum: f64,
-}
-
-impl InformationSet {
-    fn new(key: String) -> Self {
-        Self {
-            key,
-            regret_sum: [0.0; _N_ACTIONS as usize],
-            strategy_sum: [0.0; _N_ACTIONS as usize],
-            strategy: [1.0 / _N_ACTIONS as f64; _N_ACTIONS as usize],
-            reach_pr: 0.0,
-            reach_pr_sum: 0.0,
-        }
-    }
-
-    fn next_strategy(&mut self) {
-        for i in 0.._N_ACTIONS as usize {
-            self.strategy_sum[i] += self.strategy[i] * self.reach_pr;
-        }
-        self.strategy = self.calc_strategy();
-        self.reach_pr_sum += self.reach_pr;
-        self.reach_pr = 0.0;
-    }
-
-    fn calc_strategy(&self) -> [f64; _N_ACTIONS as usize] {
-        let strategy = self.make_positive(&self.regret_sum);
-        let total: f64 = strategy.iter().sum();
-        if total > 0.0 {
-            strategy.iter().map(|&x| x / total).collect::<Vec<_>>().try_into().unwrap()
-        } else {
-            [1.0 / _N_ACTIONS as f64; _N_ACTIONS as usize]
-        }
-    }
-
-    fn get_average_strategy(&self) -> [f64; _N_ACTIONS as usize] {
-        let mut strategy = self.strategy_sum;
-        for x in strategy.iter_mut() {
-            if *x < 0.001 {
-                *x = 0.0;
-            }
-        }
-        let total: f64 = strategy.iter().sum();
-        for x in strategy.iter_mut() {
-            *x /= total;
-        }
-        strategy
-    }
-
-    fn make_positive(&self, x: &[f64; _N_ACTIONS as usize]) -> Vec<f64> {
-        x.iter().map(|&val| if val > 0.0 { val } else { 0.0 }).collect()
+fn card_str(card: usize) -> &'static str {
+    match card {
+        0 => "J",
+        1 => "Q",
+        _ => "K",
     }
 }
 
-impl Clone for InformationSet {
-    fn clone(&self) -> Self {
-        Self {
-            key: self.key.clone(),
-            regret_sum: self.regret_sum.clone(),
-            strategy_sum: self.strategy_sum.clone(),
-            strategy: self.strategy.clone(),
-            reach_pr: self.reach_pr,
-            reach_pr_sum: self.reach_pr_sum,
+fn main() {
+    let mut i_map: HashMap<String, InformationSet> = HashMap::new();
+    let n_iterations = 10000;
+    let mut expected_game_value = 0.0;
+
+    for _ in 0..n_iterations {
+        expected_game_value += cfr(&mut i_map, "", -1, -1, 1.0, 1.0, 1.0);
+
+        for v in i_map.values_mut() {
+            v.next_strategy();
         }
     }
-}
 
-impl fmt::Display for InformationSet {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let strategies: Vec<String> = self
-            .get_average_strategy()
-            .iter()
-            .map(|&x| format!("{:03.2}", x))
-            .collect();
-        write!(f, "{} {}", self.key, strategies.join(" "))
-    }
+    expected_game_value /= n_iterations as f64;
+    display_results(expected_game_value, &i_map);
 }
 
 fn display_results(ev: f64, i_map: &HashMap<String, InformationSet>) {
     println!("player 1 expected value: {}", ev);
     println!("player 2 expected value: {}", -1.0 * ev);
 
-    println!();
-    println!("player 1 strategies:");
-    let sorted_items: Vec<_> = i_map.iter().filter(|(key, _)| key.len() % 2 == 0).collect();
-    for (_, v) in sorted_items {
+    let mut items = i_map.iter().collect::<Vec<_>>();
+
+    items.sort_by(|a, b| a.0.cmp(b.0));
+
+    let (p1_items, p2_items) = items.into_iter().partition::<Vec<_>, _>(|(k, _)| k.len() % 2 == 0);
+
+    println!("\nplayer 1 strategies:");
+    for (_, v) in p1_items {
         println!("{}", v);
     }
 
-    println!();
-    println!("player 2 strategies:");
-    let sorted_items: Vec<_> = i_map.iter().filter(|(key, _)| key.len() % 2 == 1).collect();
-    for (_, v) in sorted_items {
+    println!("\nplayer 2 strategies:");
+    for (_, v) in p2_items {
         println!("{}", v);
     }
 }
