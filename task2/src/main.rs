@@ -242,7 +242,7 @@ fn display_results(ev: f64, i_map: &HashMap<String, InformationSet>) {
 
     let mut items = i_map.iter().collect::<Vec<_>>();
 
-    items.sort_by(|a, b| a.0.cmp(b.0));
+    items.sort_by(|a: &(&String, &InformationSet), b| a.0.cmp(b.0));
 
     let (p1_items, p2_items) = items.into_iter().partition::<Vec<_>, _>(|(k, _)| k.len() % 2 == 0);
 
