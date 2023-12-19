@@ -4,7 +4,7 @@ use std::fmt;
 const N_ACTIONS: usize = 2;
 const N_CARDS: usize = 3;
 
-const CHANCE_ACTIONS: [&str; 2] = ["c", "b"];
+const CHANCE_ACTIONS: [&str; N_ACTIONS] = ["c", "b"];
 
 #[derive(Debug)]
 pub struct InformationSet {
@@ -96,11 +96,8 @@ pub fn cfr(
     let n = history.len();
     let is_player_1 = n % 2 == 0;
 
-    let (key, mut info_set) = get_info_set(
-        i_map,
-        if is_player_1 { card_1 } else { card_2 },
-        history,
-    );
+    let (key, mut info_set) =
+        get_info_set(i_map, if is_player_1 { card_1 } else { card_2 }, history);
 
     let strategy = &info_set.strategy;
 
@@ -123,19 +120,13 @@ pub fn cfr(
     let regrets: Vec<f64> =
         action_utils.iter().zip(strategy.iter()).map(|(&_x, &_y)| _x - util).collect();
 
-    if is_player_1 {
-        info_set
-            .regret_sum
-            .iter_mut()
-            .zip(regrets.iter())
-            .for_each(|(a, &b)| *a += pr_2 * pr_c * b);
-    } else {
-        info_set
-            .regret_sum
-            .iter_mut()
-            .zip(regrets.iter())
-            .for_each(|(a, &b)| *a += pr_1 * pr_c * b);
-    }
+    let (pr_1_factor, pr_2_factor) = if is_player_1 { (pr_2, pr_c) } else { (pr_1, pr_c) };
+
+    info_set
+        .regret_sum
+        .iter_mut()
+        .zip(regrets.iter())
+        .for_each(|(a, &b)| *a += pr_1_factor * pr_2_factor * b);
 
     i_map.insert(key, info_set);
 
@@ -178,20 +169,8 @@ fn terminal_util(history: &str, card_1: isize, card_2: isize) -> f64 {
     let card_opponent = if n % 2 == 0 { card_2 } else { card_1 };
     match history {
         "rrcbc" | "rrbc" => 1.0,
-        "rrcc" => {
-            if card_player > card_opponent {
-                1.0
-            } else {
-                -1.0
-            }
-        }
-        "rrcbb" | "rrbb" => {
-            if card_player > card_opponent {
-                2.0
-            } else {
-                -2.0
-            }
-        }
+        "rrcc" => if card_player > card_opponent { 1.0 } else { -1.0 },
+        "rrcbb" | "rrbb" => if card_player > card_opponent { 2.0 } else { -2.0 },
         _ => 0.0,
     }
 }
@@ -203,10 +182,7 @@ fn get_info_set(
 ) -> (String, InformationSet) {
     let key = format!("{} {}", card_str(card as usize), history);
 
-    let info_set = match i_map.remove(&key) {
-        Some(info_set) => info_set,
-        None => InformationSet::new(&key),
-    };
+    let info_set = i_map.remove(&key).unwrap_or_else(|| InformationSet::new(&key));
 
     (key, info_set)
 }
@@ -242,7 +218,7 @@ fn display_results(ev: f64, i_map: &HashMap<String, InformationSet>) {
 
     let mut items = i_map.iter().collect::<Vec<_>>();
 
-    items.sort_by(|a: &(&String, &InformationSet), b| a.0.cmp(b.0));
+    items.sort_by(|a, b| a.0.cmp(b.0));
 
     let (p1_items, p2_items) = items.into_iter().partition::<Vec<_>, _>(|(k, _)| k.len() % 2 == 0);
 
