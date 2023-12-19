@@ -13,11 +13,11 @@ pub fn cfr(
     pr_2: f64,
     pr_c: f64,
 ) -> f64 {
-    if is_chance_node(history) {
+    if history.is_empty() {
         return chance_util(i_map);
     }
 
-    if is_terminal(history) {
+    if history.len() == 4 {
         return terminal_util(history, card_1, card_2);
     }
 
@@ -50,10 +50,6 @@ pub fn cfr(
     util
 }
 
-fn is_chance_node(history: &str) -> bool {
-    history.is_empty()
-}
-
 fn chance_util(i_map: &mut HashMap<String, InformationSet>) -> f64 {
     let mut expected_value = 0.0;
     let n_possibilities = 6;
@@ -75,28 +71,12 @@ fn chance_util(i_map: &mut HashMap<String, InformationSet>) -> f64 {
     expected_value / n_possibilities as f64
 }
 
-fn is_terminal(history: &str) -> bool {
-    history.len() == 4
-}
-
 fn terminal_util(history: &str, card_1: isize, card_2: isize) -> f64 {
-    let card_player = if history.chars().nth(0).unwrap() == 'r' { card_1 } else { card_2 };
-    let card_opponent = if history.chars().nth(0).unwrap() == 'r' { card_2 } else { card_1 };
+    let card_player = if history.chars().next().unwrap() == 'r' { card_1 } else { card_2 };
+    let card_opponent = if history.chars().next().unwrap() == 'r' { card_2 } else { card_1 };
     match &history[2..] {
-        "cc" => {
-            if card_player > card_opponent {
-                1.0
-            } else {
-                -1.0
-            }
-        }
-        "bb" => {
-            if card_player > card_opponent {
-                2.0
-            } else {
-                -2.0
-            }
-        }
+        "cc" => if card_player > card_opponent { 1.0 } else { -1.0 },
+        "bb" => if card_player > card_opponent { 2.0 } else { -2.0 },
         "bc" | "cb" => 1.0,
         _ => 0.0,
     }
