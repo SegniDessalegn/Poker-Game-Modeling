@@ -3,6 +3,9 @@ actions = ["r", "c", "f"]
 
 def complete_terminal(history):
     history = "".join(history)
+    if history[-1] == "f":
+        return [history]
+    
     if history[-1] == "r":
         return [history + "cc", history + "cf", history + "f"]
 

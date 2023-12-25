@@ -2,20 +2,26 @@ import numpy as np
 
 _N_ACTIONS = 3
 _N_CARDS = 6
-terminals = set(["rrcc", "rrcf", "rrfc", "rrff",
-    "rcrcc", "rcrcf", "rcrfc", "rcrff",
-    "rccrcc", "rccrcf", "rccrf", "rccc", "rccf", "rcf", "rfc", "rff",
-    "crrcc", "crrcf", "crrfc", "crrff",
-    "crcrcc", "crcrcf", "crcrf", "crcc", "crcf", "crfc", "crff",
-    "ccrrcc", "ccrrcf", "ccrrf", "ccrcc", "ccrcf", "ccrfc", "ccrff",
-    "cccrcc", "cccrcf", "cccrf", "cccc", "cccf", "ccf", "cf", "f"])
+terminals = set([
+    "rrcc", "rrcf", "rrf",
+    "rcrcc", "rcrcf", "rcrf",
+    "rccrcc", "rccrcf", "rccrf",
+    "rccc", "rccf", "rcf", "rf",
+    "crrcc", "crrcf", "crrf",
+    "crcrcc", "crcrcf", "crcrf",
+    "crcc", "crcf", "crf",
+    "ccrrcc", "ccrrcf", "ccrrf",
+    "ccrcc", "ccrcf", "ccrf",
+    "cccrcc", "cccrcf", "cccrf",
+    "cccc", "cccf", "ccf", "cf", "f"
+])
 
 def main():
     """
     Run iterations of counterfactual regret minimization algorithm.
     """
     i_map = {}  # map of information sets
-    n_iterations = 10
+    n_iterations = 1000
     expected_game_value = 0
 
     for _ in range(n_iterations):
@@ -57,11 +63,11 @@ def cfr(last_action, bet, play_count, i_map, history="", card_1=-1, card_2=-1, p
 
         next_history = history + action
         if is_player_1:
-            action_utils[i] = -1 * cfr(action, bet + 2, play_count + 1, i_map, next_history,
+            action_utils[i] = -1 * cfr(action, bet + (2 if action == "r" else 0), play_count + 1, i_map, next_history,
                                        card_1, card_2,
                                        pr_1 * strategy[i], pr_2, pr_c)
         else:
-            action_utils[i] = -1 * cfr(action, bet + 2, play_count + 1, i_map, next_history,
+            action_utils[i] = -1 * cfr(action, bet + (2 if action == "r" else 0), play_count + 1, i_map, next_history,
                                        card_1, card_2,
                                        pr_1, pr_2 * strategy[i], pr_c)
 
@@ -74,13 +80,11 @@ def cfr(last_action, bet, play_count, i_map, history="", card_1=-1, card_2=-1, p
 
     return util
 
-
 def is_chance_node(history):
     """
     Determine if we are at a chance node based on tree history.
     """
     return history == ""
-
 
 def chance_util(i_map):
     expected_value = 0
@@ -91,7 +95,6 @@ def chance_util(i_map):
                 expected_value += cfr("", 0, 0, i_map, "ii", i, j,
                                       1, 1, 1/n_possibilities)
     return expected_value/n_possibilities
-
 
 def is_terminal(history):
     """
@@ -173,12 +176,9 @@ class InformationSet():
 
 
 def display_results(ev, i_map):
-    print("==== notations ====")
+    print("==== notation ====")
     print("i => initial")
-    print("r => raise")
-    print("c => check")
-    print("f => fold")
-    print("===================")
+    print("==================")
     print()
 
     print('player 1 expected value: {}'.format(ev))
