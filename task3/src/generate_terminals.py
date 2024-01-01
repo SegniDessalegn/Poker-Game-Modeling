@@ -1,15 +1,12 @@
 
-actions = ["r", "c", "f"]
+actions = ["c", "r", "f"]
 
 def complete_terminal(history):
     history = "".join(history)
     if history[-1] == "f":
         return [history]
-    
-    if history[-1] == "r":
-        return [history + "cc", history + "cf", history + "f"]
 
-    if len(history) >= 2 and history[-2] == "r":
+    if history[-1] == "r":
         return [history + "c", history + "f"]
 
     return [history]
@@ -17,14 +14,14 @@ def complete_terminal(history):
 
 def gen(last_action, play_count, bet, history):
 
-    if last_action == "f" or play_count > 4:
+    if last_action == "f" or play_count == 0:
         for terminal in complete_terminal(history):
             print(terminal)
         return
 
     for action in actions:
         new_bet = bet
-        new_play_count = play_count + 1
+        new_play_count = play_count - 1
         if action == "r":
             if bet == 4:
                 continue
@@ -35,4 +32,13 @@ def gen(last_action, play_count, bet, history):
         history.pop()
 
 
-gen("", 1, 0, [])
+def generate():
+    print()
+    print("first round terminals")
+    gen("", 2, 0, [])
+    print()
+    print("second round terminals")
+    gen("", 4, 0, [])
+
+
+generate()

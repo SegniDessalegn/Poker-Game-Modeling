@@ -1,21 +1,48 @@
 use std::collections::HashMap;
 use std::fmt;
+use lazy_static::lazy_static;
+use rand::Rng;
 
 const N_ACTIONS: usize = 3;
-const N_CARDS: usize = 6;
-const CHANCE_ACTIONS: [&str; N_ACTIONS] = ["c", "f", "r"];
+const N_CARDS: usize = 3;
+const CHANCE_ACTIONS: [&str; N_ACTIONS] = ["c", "r", "f"];
+
+lazy_static! {
+    static ref PUBLIC_CARD: isize = rand::thread_rng().gen_range(0..=2); // Assuming card values range from 0 to 2
+}
+
 const TERMINALS: &[&str] = &[
-    "rrcc", "rrcf", "rrf",
-    "rcrcc", "rcrcf", "rcrf",
-    "rccrcc", "rccrcf", "rccrf",
-    "rccc", "rccf", "rcf", "rf",
-    "crrcc", "crrcf", "crrf",
-    "crcrcc", "crcrcf", "crcrf",
-    "crcc", "crcf", "crf",
-    "ccrrcc", "ccrrcf", "ccrrf",
-    "ccrcc", "ccrcf", "ccrf",
-    "cccrcc", "cccrcf", "cccrf",
-    "cccc", "cccf", "ccf", "cf", "f"
+    "iicccc",
+    "iicccrc",
+    "iicccrf",
+    "iicccf",
+    "iiccrc",
+    "iiccrrc",
+    "iicccr",
+    "iiccrrf",
+    "iiccrf",
+    "iiccf",
+    "iicrcc",
+    "iicrcrc",
+    "iicrcrf",
+    "iicrcf",
+    "iicrrc",
+    "iicrrf",
+    "iicrf",
+    "iicf",
+    "iirccc",
+    "iirccrc",
+    "iirccrf",
+    "iirccf",
+    "iircrc",
+    "iircrf",
+    "iircf",
+    "iirrcc",
+    "iirrcf",
+    "iirrcc",
+    "iirrf",
+    "iirf",
+    "iif",
 ];
 
 #[derive(Debug)]
@@ -84,14 +111,22 @@ impl InformationSet {
 
 impl fmt::Display for InformationSet {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{} {:.2?}", self.key, self.get_average_strategy())
+        let strategies: Vec<String> = self
+            .get_average_strategy()
+            .iter()
+            .map(|x| format!("{:03.2}", x))
+            .collect();
+
+        let mut card = self.key.clone();
+        if card.split_whitespace().last().map_or(0, |s| s.len()) > 3 {
+            card = format!("{}{}{}", &card[0..1], card_str(*PUBLIC_CARD as usize), &card[1..]);
+        }
+
+        write!(f, "{} [{}]", card, strategies.join(", "))
     }
 }
 
 pub fn cfr(
-    last_action: &str,
-    bet: isize,
-    play_count: isize,
     i_map: &mut HashMap<String, InformationSet>,
     history: &str,
     card_1: isize,
@@ -99,13 +134,14 @@ pub fn cfr(
     pr_1: f64,
     pr_2: f64,
     pr_c: f64,
+    bet: isize,
 ) -> f64 {
     if is_chance_node(history) {
         return chance_util(i_map);
     }
 
-    if is_terminal(history) || last_action == "f" || play_count > 4 {
-        return terminal_util(history, card_1, card_2);
+    if is_terminal(history) {
+        return terminal_util(history, card_1, card_2) as f64;
     }
 
     let n = history.len();
@@ -128,10 +164,10 @@ pub fn cfr(
         let next_history = format!("{}{}", history, action);
         if is_player_1 {
             action_utils[i] =
-                -1.0 * cfr( action, bet + if action == &"r" { 2 } else { 0 }, play_count + 1, i_map, &next_history, card_1, card_2, pr_1 * strategy[i], pr_2, pr_c);
+                -1.0 * cfr(i_map, &next_history, card_1, card_2, pr_1 * strategy[i], pr_2, pr_c, bet + if action == &"r" { 2 } else { 0 });
         } else {
             action_utils[i] =
-                -1.0 * cfr(action, bet + if action == &"r" { 2 } else { 0 }, play_count + 1, i_map, &next_history, card_1, card_2, pr_1, pr_2 * strategy[i], pr_c);
+                -1.0 * cfr(i_map, &next_history, card_1, card_2, pr_1, pr_2 * strategy[i], pr_c, bet + if action == &"r" { 2 } else { 0 });
         }
     }
 
@@ -163,9 +199,6 @@ fn chance_util(i_map: &mut HashMap<String, InformationSet>) -> f64 {
         for j in 0..N_CARDS {
             if i != j {
                 expected_value += cfr(
-                    "",
-                    0,
-                    0,
                     i_map,
                     "ii",
                     i as isize,
@@ -173,6 +206,7 @@ fn chance_util(i_map: &mut HashMap<String, InformationSet>) -> f64 {
                     1.0,
                     1.0,
                     1.0 / n_possibilities as f64,
+                    0
                 );
             }
         }
@@ -185,14 +219,65 @@ fn is_terminal(history: &str) -> bool {
 }
 
 fn terminal_util(history: &str, card_1: isize, card_2: isize) -> f64 {
+    let card_val = [("J", 1), ("Q", 2), ("K", 3)];
+
     let n = history.len();
-    let card_player = if n % 2 == 0 { card_1 } else { card_2 };
+    let card_player = if n % 2 == 0 { 1 } else { -1 };
 
-    let net = history.chars().filter(|&c| c == 'c').count() as i32
-        + (2 * history.chars().filter(|&c| c == 'r').count() as i32);
+    let net = get_pot(history, card_player) as f64;
 
-    return if card_player > card_1 { net as f64 } else { -net as f64 };
+    if history.ends_with('f') {
+        return -((card_player as f64) * net);
+    } else if card_player == 1 {
+        if card_1 == *PUBLIC_CARD {
+            return (card_player as f64) * net;
+        } else if card_2 == *PUBLIC_CARD {
+            return -((card_player as f64) * net);
+        } else {
+            let val_1 = card_val.iter().find(|&&(s, _)| s == card_str(card_1 as usize)).unwrap().1;
+            let val_2 = card_val.iter().find(|&&(s, _)| s == card_str(card_2 as usize)).unwrap().1;
+            return (card_player as f64) * (if val_1 > val_2 { 1.0 } else { -1.0 }) * net;
+        }
+    } else {
+        if card_2 == *PUBLIC_CARD {
+            return -((card_player as f64) * net);
+        } else if card_1 == *PUBLIC_CARD {
+            return (card_player as f64) * net;
+        } else {
+            let val_1 = card_val.iter().find(|&&(s, _)| s == card_str(card_1 as usize)).unwrap().1;
+            let val_2 = card_val.iter().find(|&&(s, _)| s == card_str(card_2 as usize)).unwrap().1;
+            return -((card_player as f64) * (if val_1 > val_2 { 1.0 } else { -1.0 }) * net);
+        }
+    }
 }
+
+
+fn get_pot(history: &str, turn: isize) -> isize {
+    let mut bet = [0, 0];
+    let mut prev = 1;
+    let mut player = 0;
+    let pot = 1;
+    let mut bet_round = 1;
+
+    for &op in history.as_bytes().iter().skip(2) {
+        match op as char {
+            'r' => {
+                bet[player] += prev - ((bet_round * 2) - bet[player]);
+                prev += 2;
+                bet_round += 1;
+            }
+            'c' => {
+                bet[player] += prev - bet[player];
+            }
+            _ => {}
+        }
+
+        player = (player + 1) % 2;
+    }
+
+    pot + if turn == -1 { bet[0] } else { bet[1] }
+}
+
 
 fn get_info_set(
     i_map: &mut HashMap<String, InformationSet>,
@@ -207,21 +292,22 @@ fn get_info_set(
 }
 
 fn card_str(card: usize) -> &'static str {
-    let combs = ["JJ", "JQ", "JK", "QQ", "QK", "KK"];
+    let combs = ["J", "Q", "K"];
     return combs[card];
 }
 
 fn main() {
     let mut i_map: HashMap<String, InformationSet> = HashMap::new();
-    let n_iterations = 1000;
+    let n_iterations = 10000;
     let mut expected_game_value = 0.0;
 
-    for _ in 0..n_iterations {
-        expected_game_value += cfr("", 0, 0, &mut i_map, "", -1, -1, 1.0, 1.0, 1.0);
+    for i in 0..n_iterations {
+        expected_game_value += cfr(&mut i_map, "", -1, -1, 1.0, 1.0, 1.0, 0);
 
         for v in i_map.values_mut() {
             v.next_strategy();
         }
+        println!("iteration {}, expected game value: {}", i, expected_game_value / n_iterations as f64);
     }
 
     expected_game_value /= n_iterations as f64;
@@ -229,6 +315,7 @@ fn main() {
 }
 
 fn display_results(ev: f64, i_map: &HashMap<String, InformationSet>) {
+    println!();
     println!("==== notation ====");
     println!("i => initial");
     println!("==================");
@@ -236,6 +323,12 @@ fn display_results(ev: f64, i_map: &HashMap<String, InformationSet>) {
 
     println!("player 1 expected value: {}", ev);
     println!("player 2 expected value: {}", -1.0 * ev);
+    println!();
+
+    println!("******* PUBLIC CARD ********");
+    println!("-----------> {} <------------", card_str(*PUBLIC_CARD as usize));
+    println!("****************************");
+    println!();
 
     let mut items = i_map.iter().collect::<Vec<_>>();
 

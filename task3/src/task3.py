@@ -1,19 +1,42 @@
+import random
 import numpy as np
 
 _N_ACTIONS = 3
-_N_CARDS = 6
+_N_CARDS = 3
+PUBLIC_CARD = random.randint(0, 2)
+
 terminals = set([
-    "rrcc", "rrcf", "rrf",
-    "rcrcc", "rcrcf", "rcrf",
-    "rccrcc", "rccrcf", "rccrf",
-    "rccc", "rccf", "rcf", "rf",
-    "crrcc", "crrcf", "crrf",
-    "crcrcc", "crcrcf", "crcrf",
-    "crcc", "crcf", "crf",
-    "ccrrcc", "ccrrcf", "ccrrf",
-    "ccrcc", "ccrcf", "ccrf",
-    "cccrcc", "cccrcf", "cccrf",
-    "cccc", "cccf", "ccf", "cf", "f"
+    "iicccc",
+    "iicccrc",
+    "iicccrf",
+    "iicccf",
+    "iiccrc",
+    "iiccrrc",
+    "iicccr",
+    "iiccrrf",
+    "iiccrf",
+    "iiccf",
+    "iicrcc",
+    "iicrcrc",
+    "iicrcrf",
+    "iicrcf",
+    "iicrrc",
+    "iicrrf",
+    "iicrf",
+    "iicf",
+    "iirccc",
+    "iirccrc",
+    "iirccrf",
+    "iirccf",
+    "iircrc",
+    "iircrf",
+    "iircf",
+    "iirrcc",
+    "iirrcf",
+    "iirrcc",
+    "iirrf",
+    "iirf",
+    "iif",
 ])
 
 def main():
@@ -21,28 +44,28 @@ def main():
     Run iterations of counterfactual regret minimization algorithm.
     """
     i_map = {}  # map of information sets
-    n_iterations = 1000
+    n_iterations = 10000
     expected_game_value = 0
 
-    for _ in range(n_iterations):
-        expected_game_value += cfr("", 0, 0, i_map)
+    for i in range(n_iterations - 1):
+        expected_game_value += cfr(i_map, "", 0, 0)
         for _, v in i_map.items():
             v.next_strategy()
+        print("iteration", i, "expected value:", expected_game_value / n_iterations)
 
     expected_game_value /= n_iterations
 
     display_results(expected_game_value, i_map)
 
 
-def cfr(last_action, bet, play_count, i_map, history="", card_1=-1, card_2=-1, pr_1=1, pr_2=1, pr_c=1):
+def cfr(i_map, history="", card_1=-1, card_2=-1, pr_1=1, pr_2=1, pr_c=1, bet = 0):
     """
     Counterfactual regret minimization algorithm.
     """
-
     if is_chance_node(history):
         return chance_util(i_map)
 
-    if is_terminal(history) or last_action == "f" or play_count > 4:
+    if is_terminal(history):
         return terminal_util(history, card_1, card_2)
 
     n = len(history)
@@ -63,13 +86,13 @@ def cfr(last_action, bet, play_count, i_map, history="", card_1=-1, card_2=-1, p
 
         next_history = history + action
         if is_player_1:
-            action_utils[i] = -1 * cfr(action, bet + (2 if action == "r" else 0), play_count + 1, i_map, next_history,
+            action_utils[i] = -1 * cfr(i_map, next_history,
                                        card_1, card_2,
-                                       pr_1 * strategy[i], pr_2, pr_c)
+                                       pr_1 * strategy[i], pr_2, pr_c, bet + (2 if action == "r" else 0))
         else:
-            action_utils[i] = -1 * cfr(action, bet + (2 if action == "r" else 0), play_count + 1, i_map, next_history,
+            action_utils[i] = -1 * cfr(i_map, next_history,
                                        card_1, card_2,
-                                       pr_1, pr_2 * strategy[i], pr_c)
+                                       pr_1, pr_2 * strategy[i], pr_c, bet + (2 if action == "r" else 0))
 
     util = sum(action_utils * strategy)
     regrets = action_utils - util
@@ -92,9 +115,9 @@ def chance_util(i_map):
     for i in range(_N_CARDS):
         for j in range(_N_CARDS):
             if i != j:
-                expected_value += cfr("", 0, 0, i_map, "ii", i, j,
-                                      1, 1, 1/n_possibilities)
-    return expected_value/n_possibilities
+                expected_value += cfr(i_map, "ii", i, j,
+                                    1, 1, 1/n_possibilities)
+    return expected_value / n_possibilities
 
 def is_terminal(history):
     """
@@ -103,16 +126,53 @@ def is_terminal(history):
     return history in terminals
 
 def terminal_util(history, card_1, card_2):
+    card_val = {"J": 1, "Q": 2, "K": 3}
 
     n = len(history)
-    card_player = card_1 if n % 2 == 0 else card_2
+    card_player = 1 if n % 2 == 0 else -1
 
-    net = history.count("c") + (2 * history.count("r"))
+    net = get_pot(history, card_player)
 
-    return (1 if card_player > card_1 else -1) * (net)
+    if history[-1] == "f":
+        return -card_player * net
+
+    elif card_player == 1:
+        if card_1 == PUBLIC_CARD:
+            return card_player * net
+        elif card_2 == PUBLIC_CARD:
+            return -card_player * net
+        else:
+            return card_player * (1 if card_val[card_str(card_1)] > card_val[card_str(card_2)] else -1) * net
+    else:
+        if card_2 == PUBLIC_CARD:
+            return -card_player * net
+        elif card_1 == PUBLIC_CARD:
+            return card_player * net
+        else:
+            return -(card_player * (1 if card_val[card_str(card_1)] > card_val[card_str(card_2)] else -1) * net)
+
+
+def get_pot(history, turn):
+    bet = {0:0, 1:0}
+    prev = 1
+    player = 0
+    pot = 1
+    bet_round = 1
+    for op in history[2:]:
+        if op == "r":
+            bet[player] += prev - ((bet_round * 2) - bet[player])
+            prev += 2
+            bet_round += 1
+        elif op == "c":
+            bet[player] += prev - bet[player]
+
+        player = (player + 1) % 2
+
+    return pot + (bet[0] if turn == -1 else bet[1])
+
 
 def card_str(card):
-    combs = ["JJ", "JQ", "JK", "QQ", "QK", "KK"]
+    combs = ["J", "Q", "K"]
     return combs[card]
 
 def get_info_set(i_map, card, history):
@@ -172,10 +232,14 @@ class InformationSet():
     def __str__(self):
         strategies = ['{:03.2f}'.format(x)
                       for x in self.get_average_strategy()]
-        return '{} {}'.format(self.key.ljust(6), strategies)
+        card = self.key.ljust(6)
+        if len((card.split())[-1]) > 3:
+            card = card[0] + card_str(PUBLIC_CARD) + card[1:]
+        return '{} {}'.format(card, strategies)
 
 
 def display_results(ev, i_map):
+    print()
     print("==== notation ====")
     print("i => initial")
     print("==================")
@@ -183,10 +247,15 @@ def display_results(ev, i_map):
 
     print('player 1 expected value: {}'.format(ev))
     print('player 2 expected value: {}'.format(-1 * ev))
+    print()
 
+    print("******* PUBLIC CARD ********")
+    print("----------->", card_str(PUBLIC_CARD), "<------------")
+    print("****************************")
     print()
     print('player 1 strategies:')
     sorted_items = sorted(i_map.items(), key=lambda x: x[0])
+
     for _, v in filter(lambda x: len(x[0]) % 2 == 0, sorted_items):
         print(v)
     print()
