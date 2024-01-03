@@ -1,4 +1,15 @@
 
+"""
+Generates terminal histories in a full exhaustive game representation
+It also generates specifically for first round and second round terminals
+
+We can achieve this using DFS (Depth First Search) on the possible operations
+-> There are three actions (c, r, f)
+-> The game has two rounds, unless 'f' action is choosen
+-> There can be at most 2 rounds of bet
+"""
+
+
 actions = ["c", "r", "f"]
 
 def complete_terminal(history):

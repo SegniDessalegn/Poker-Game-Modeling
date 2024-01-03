@@ -4,7 +4,196 @@ use std::fmt;
 const N_ACTIONS: usize = 2;
 const N_CARDS: usize = 3;
 
-const CHANCE_ACTIONS: [&str; N_ACTIONS] = ["c", "b"];
+const CHANCE_ACTIONS: [&str; N_ACTIONS] = ["c", "b"]; // There are three actions, 'c' => call, 'bet' => bet
+
+fn main() {
+    let mut i_map: HashMap<String, InformationSet> = HashMap::new();
+    let n_iterations = 10000;
+    let mut expected_game_value = 0.0;
+
+    for _ in 0..n_iterations {
+        expected_game_value += cfr(&mut i_map, "", -1, -1, 1.0, 1.0, 1.0);
+
+        for v in i_map.values_mut() {
+            v.next_strategy();
+        }
+    }
+
+    expected_game_value /= n_iterations as f64;
+    display_results(expected_game_value, &i_map);
+}
+
+// The CFR (Counter Factual Regret Minimization) algorithm
+pub fn cfr(
+    i_map: &mut HashMap<String, InformationSet>,
+    history: &str,
+    card_1: isize,
+    card_2: isize,
+    pr_1: f64,
+    pr_2: f64,
+    pr_c: f64,
+) -> f64 {
+    if is_chance_node(history) {
+        return chance_util(i_map);
+    }
+
+    if is_terminal(history) {
+        return terminal_util(history, card_1, card_2);
+    }
+
+    let n = history.len();
+    let is_player_1 = n % 2 == 0;
+
+    let (key, mut info_set) =
+        get_info_set(i_map, if is_player_1 { card_1 } else { card_2 }, history);
+
+    let strategy = &info_set.strategy;
+
+    info_set.reach_pr += if is_player_1 { pr_1 } else { pr_2 };
+
+    let mut action_utils = [0.0; N_ACTIONS];
+
+    for (i, action) in CHANCE_ACTIONS.iter().enumerate() {
+        let next_history = format!("{}{}", history, action);
+        if is_player_1 {
+            action_utils[i] = -1.0
+                * cfr(
+                    i_map,
+                    &next_history,
+                    card_1,
+                    card_2,
+                    pr_1 * strategy[i],
+                    pr_2,
+                    pr_c,
+                );
+        } else {
+            action_utils[i] = -1.0
+                * cfr(
+                    i_map,
+                    &next_history,
+                    card_1,
+                    card_2,
+                    pr_1,
+                    pr_2 * strategy[i],
+                    pr_c,
+                );
+        }
+    }
+
+    let util = action_utils
+        .iter()
+        .zip(strategy.iter())
+        .map(|(&x, &y)| x * y)
+        .sum();
+    let regrets: Vec<f64> = action_utils
+        .iter()
+        .zip(strategy.iter())
+        .map(|(&_x, &_y)| _x - util)
+        .collect();
+
+    let (pr_1_factor, pr_2_factor) = if is_player_1 {
+        (pr_2, pr_c)
+    } else {
+        (pr_1, pr_c)
+    };
+
+    info_set
+        .regret_sum
+        .iter_mut()
+        .zip(regrets.iter())
+        .for_each(|(a, &b)| *a += pr_1_factor * pr_2_factor * b);
+
+    i_map.insert(key, info_set);
+
+    util
+}
+
+impl fmt::Display for InformationSet {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{} {:?}", self.key, self.get_average_strategy())
+    }
+}
+
+// Determine if we are at the natural moves (random chance nodes)
+fn is_chance_node(history: &str) -> bool {
+    history.is_empty()
+}
+
+// Start the CFR algorithm by iterating through every combination of chance nodes
+fn chance_util(i_map: &mut HashMap<String, InformationSet>) -> f64 {
+    let mut expected_value = 0.0;
+    let n_possibilities = 6;
+    for i in 0..N_CARDS {
+        for j in 0..N_CARDS {
+            if i != j {
+                expected_value += cfr(
+                    i_map,
+                    "rr",
+                    i as isize,
+                    j as isize,
+                    1.0,
+                    1.0,
+                    1.0 / n_possibilities as f64,
+                );
+            }
+        }
+    }
+    expected_value / n_possibilities as f64
+}
+
+// Check if we have reached the terminal history
+fn is_terminal(history: &str) -> bool {
+    let possibilities = ["rrcc", "rrcbc", "rrcbb", "rrbc", "rrbb"];
+    possibilities.contains(&history)
+}
+
+// Calculate the terminal utility
+fn terminal_util(history: &str, card_1: isize, card_2: isize) -> f64 {
+    let n = history.len();
+    let card_player = if n % 2 == 0 { card_1 } else { card_2 };
+    let card_opponent = if n % 2 == 0 { card_2 } else { card_1 };
+    match history {
+        "rrcbc" | "rrbc" => 1.0,
+        "rrcc" => {
+            if card_player > card_opponent {
+                1.0
+            } else {
+                -1.0
+            }
+        }
+        "rrcbb" | "rrbb" => {
+            if card_player > card_opponent {
+                2.0
+            } else {
+                -2.0
+            }
+        }
+        _ => 0.0,
+    }
+}
+
+// Retrieve information set from dictionary
+fn get_info_set(
+    i_map: &mut HashMap<String, InformationSet>,
+    card: isize,
+    history: &str,
+) -> (String, InformationSet) {
+    let key = format!("{} {}", card_str(card as usize), history);
+
+    let info_set = i_map
+        .remove(&key)
+        .unwrap_or_else(|| InformationSet::new(&key));
+
+    (key, info_set)
+}
+
+fn card_str(card: usize) -> &'static str {
+    match card {
+        0 => "J",
+        1 => "Q",
+        _ => "K",
+    }
+}
 
 #[derive(Debug)]
 pub struct InformationSet {
@@ -70,148 +259,6 @@ impl InformationSet {
     }
 }
 
-impl fmt::Display for InformationSet {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{} {:?}", self.key, self.get_average_strategy())
-    }
-}
-
-pub fn cfr(
-    i_map: &mut HashMap<String, InformationSet>,
-    history: &str,
-    card_1: isize,
-    card_2: isize,
-    pr_1: f64,
-    pr_2: f64,
-    pr_c: f64,
-) -> f64 {
-    if is_chance_node(history) {
-        return chance_util(i_map);
-    }
-
-    if is_terminal(history) {
-        return terminal_util(history, card_1, card_2);
-    }
-
-    let n = history.len();
-    let is_player_1 = n % 2 == 0;
-
-    let (key, mut info_set) =
-        get_info_set(i_map, if is_player_1 { card_1 } else { card_2 }, history);
-
-    let strategy = &info_set.strategy;
-
-    info_set.reach_pr += if is_player_1 { pr_1 } else { pr_2 };
-
-    let mut action_utils = [0.0; N_ACTIONS];
-
-    for (i, action) in CHANCE_ACTIONS.iter().enumerate() {
-        let next_history = format!("{}{}", history, action);
-        if is_player_1 {
-            action_utils[i] =
-                -1.0 * cfr(i_map, &next_history, card_1, card_2, pr_1 * strategy[i], pr_2, pr_c);
-        } else {
-            action_utils[i] =
-                -1.0 * cfr(i_map, &next_history, card_1, card_2, pr_1, pr_2 * strategy[i], pr_c);
-        }
-    }
-
-    let util = action_utils.iter().zip(strategy.iter()).map(|(&x, &y)| x * y).sum();
-    let regrets: Vec<f64> =
-        action_utils.iter().zip(strategy.iter()).map(|(&_x, &_y)| _x - util).collect();
-
-    let (pr_1_factor, pr_2_factor) = if is_player_1 { (pr_2, pr_c) } else { (pr_1, pr_c) };
-
-    info_set
-        .regret_sum
-        .iter_mut()
-        .zip(regrets.iter())
-        .for_each(|(a, &b)| *a += pr_1_factor * pr_2_factor * b);
-
-    i_map.insert(key, info_set);
-
-    util
-}
-
-fn is_chance_node(history: &str) -> bool {
-    history.is_empty()
-}
-
-fn chance_util(i_map: &mut HashMap<String, InformationSet>) -> f64 {
-    let mut expected_value = 0.0;
-    let n_possibilities = 6;
-    for i in 0..N_CARDS {
-        for j in 0..N_CARDS {
-            if i != j {
-                expected_value += cfr(
-                    i_map,
-                    "rr",
-                    i as isize,
-                    j as isize,
-                    1.0,
-                    1.0,
-                    1.0 / n_possibilities as f64,
-                );
-            }
-        }
-    }
-    expected_value / n_possibilities as f64
-}
-
-fn is_terminal(history: &str) -> bool {
-    let possibilities = ["rrcc", "rrcbc", "rrcbb", "rrbc", "rrbb"];
-    possibilities.contains(&history)
-}
-
-fn terminal_util(history: &str, card_1: isize, card_2: isize) -> f64 {
-    let n = history.len();
-    let card_player = if n % 2 == 0 { card_1 } else { card_2 };
-    let card_opponent = if n % 2 == 0 { card_2 } else { card_1 };
-    match history {
-        "rrcbc" | "rrbc" => 1.0,
-        "rrcc" => if card_player > card_opponent { 1.0 } else { -1.0 },
-        "rrcbb" | "rrbb" => if card_player > card_opponent { 2.0 } else { -2.0 },
-        _ => 0.0,
-    }
-}
-
-fn get_info_set(
-    i_map: &mut HashMap<String, InformationSet>,
-    card: isize,
-    history: &str,
-) -> (String, InformationSet) {
-    let key = format!("{} {}", card_str(card as usize), history);
-
-    let info_set = i_map.remove(&key).unwrap_or_else(|| InformationSet::new(&key));
-
-    (key, info_set)
-}
-
-fn card_str(card: usize) -> &'static str {
-    match card {
-        0 => "J",
-        1 => "Q",
-        _ => "K",
-    }
-}
-
-fn main() {
-    let mut i_map: HashMap<String, InformationSet> = HashMap::new();
-    let n_iterations = 10000;
-    let mut expected_game_value = 0.0;
-
-    for _ in 0..n_iterations {
-        expected_game_value += cfr(&mut i_map, "", -1, -1, 1.0, 1.0, 1.0);
-
-        for v in i_map.values_mut() {
-            v.next_strategy();
-        }
-    }
-
-    expected_game_value /= n_iterations as f64;
-    display_results(expected_game_value, &i_map);
-}
-
 fn display_results(ev: f64, i_map: &HashMap<String, InformationSet>) {
     println!("player 1 expected value: {}", ev);
     println!("player 2 expected value: {}", -1.0 * ev);
@@ -220,7 +267,9 @@ fn display_results(ev: f64, i_map: &HashMap<String, InformationSet>) {
 
     items.sort_by(|a, b| a.0.cmp(b.0));
 
-    let (p1_items, p2_items) = items.into_iter().partition::<Vec<_>, _>(|(k, _)| k.len() % 2 == 0);
+    let (p1_items, p2_items) = items
+        .into_iter()
+        .partition::<Vec<_>, _>(|(k, _)| k.len() % 2 == 0);
 
     println!("\nplayer 1 strategies:");
     for (_, v) in p1_items {
